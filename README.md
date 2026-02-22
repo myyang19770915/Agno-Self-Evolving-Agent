@@ -110,7 +110,8 @@ agno_project/
 │   ├── agent.db            # 技能資料庫
 │   ├── business.db         # 商業資料庫
 │   └── sessions.db         # 對話歷史
-└── charts/                 # Plotly HTML 圖表輸出目錄
+├── charts/                 # Plotly HTML 圖表輸出目錄
+└── frontend/               # 🎨 React + Vite + Tailwind 現代化前端 UI
 ```
 
 ---
@@ -149,13 +150,20 @@ DEFAULT_MODEL=gpt-5-mini
 
 ### 4. 啟動 Agent
 
-```powershell
-# 方式 1: AGUI Web 介面
+# 方式 1: 前端 React UI (推薦)
+# 終端機 1: 啟動後端
 uv run python app.py
-# 開啟瀏覽器 → http://localhost:7777
-# 圖表瀏覽 → http://localhost:7777/charts/
+# 終端機 2: 啟動前端
+cd frontend
+npm install
+npm run dev
+# 瀏覽器開啟 http://localhost:5173
 
-# 方式 2: CLI 互動式終端
+# 方式 2: AGUI 內建介面
+uv run python app.py
+# 瀏覽器開啟 http://localhost:7777
+
+# 方式 3: CLI 互動式終端
 uv run python cli.py
 ```
 
@@ -402,6 +410,25 @@ num_history_runs=5,
 
 ---
 
+## 🛑 開發經驗與踩坑紀錄 (Pitfalls & Learnings)
+
+在開發與串接過程中，我們記錄了幾個重要的踩坑經驗與修復方案，避免未來重蹈覆轍：
+
+### 1. Markdown 表格單行渲染失敗 (remark-gfm)
+- **問題**：後端 AI 模型或是資料庫查詢回傳的 Markdown 表格，因為網路傳輸等原因變成沒有換行的連續字串（例：`| col1 | col2 | |---:|---:| | val1 | val2 |`），導致前端 `remark-gfm` 無法正確識別為表格。
+- **解法**：在前端 Markdown 解析前，先利用 Regex (`/\|\s+\|/g`) 將相鄰的 Pipe 自動插入換行符號（改為 `|\n|`），強制恢復正規的 Markdown 表格結構，順利解決了表格渲染破版的問題。
+
+### 2. DeepSeek Reasoner 歷史紀錄報錯 (Missing reasoning_content)
+- **問題**：如果在 `gpt-5-mini` 產生的對話歷史紀錄後，將對話切換為 `deepseek-reasoner` 模型，會觸發 `litellm.BadRequestError: DeepseekException - "Missing reasoning_content field in the assistant message"`，導致無法繼續對話。
+- **解法**：在 `agent_core.py` 實作了 `PatchedLiteLLMOpenAI`，繼承自 `LiteLLMOpenAI`。攔截發送給 OpenAI 相容 API 的 `_format_message` 字典，強制為角色為 `assistant` 的訊息注入 `reasoning_content: ""`，成功讓舊對話也能通過 DeepSeek 嚴格的 API 驗證。
+
+### 3. React UI 出現重複對話訊息 (SSE Stream 處理)
+- **問題**：使用 Server-Sent Events (SSE) 讀取 Agno 後端推播的字元串流生成對話，卻發現在畫面會一直出現重複的最終回應字串。
+- **解法**：這是因為 Agno 串流處理會在每個 `RunContent` 推播片段後，最後推播一個包含完整聚合結果的 `RunCompleted` 或者是 `ModelRequestCompleted` 事件。若前端不忽略該事件，會誤將「完整字串」再次附加到推播字串尾端。在前端更新過濾條件：忽略 `RunCompleted` 事件，專注處理 `chunk`，即解決此重複問題。
+
+---
+
 ## 📄 License
 
 This project is for development and learning purposes.
+

@@ -18,5 +18,10 @@
     "description": "Query product categories and return list[dict] with category, product_count, average_price (rounded). Uses db_helper for DB access.",
     "file": "get_category_stats.py",
     "usage": "from tools.get_category_stats import get_category_stats"
+  },
+  "plot_monthly_revenue_trend": {
+    "description": "Plot monthly revenue trend line chart with order count bar chart on secondary axis. Query database for completed orders in specified year.",
+    "file": "plot_monthly_revenue_trend.py",
+    "usage": "from tools.plot_monthly_revenue_trend import plot_monthly_revenue_trend"
   }
 }
