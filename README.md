@@ -305,6 +305,35 @@ flowchart LR
 
 ---
 
+## 🔌 Agno OS API 使用參考 (REST API)
+
+若未來需要開發其他端點或深入整合，以下為目前前端介接 Agno OS 後端的標準 REST API 端點（預設跑在 `http://localhost:7777`）：
+
+### 1. 取得歷史會話列表
+- **Endpoint**: `GET /sessions`
+- **Params**: `?limit=50&sort_order=desc`
+- **回傳**: 會話陣列，包含 `session_id`, `session_name`, `created_at`。
+
+### 2. 建立新會話
+- **Endpoint**: `POST /sessions`
+- **Body (JSON)**: `{"type": "agent"}`
+- **回傳**: 新建立的會話物件。
+
+### 3. 讀取單次會話歷史對話
+- **Endpoint**: `GET /sessions/{session_id}`
+- **回傳**: 包含該會話所有詳細內容的 JSON，前端透過解析其中的 `chat_history` 陣列來還原對話畫面（過濾 `role` 為 `user` 與 `assistant`/`model` 的訊息）。
+
+### 4. 傳送訊息並取得串流回應 (SSE)
+- **Endpoint**: `POST /agents/{agent_id}/runs`
+- **Format**: `multipart/form-data`
+- **Payload**:
+  - `message`: 使用者輸入的文字 (String)
+  - `stream`: 是否開啟串流 `"true"` (String)
+  - `session_id`: 當前的會話 ID (String)
+- **備註**: 對於 `agent_id`，我們在 `app.py` 中針對不同的模型註冊了獨立的 Agent（例如 `self-evolving-agent-gpt-5-mini`、`self-evolving-agent-deepseek-reasoner` 等），因此可透過替換 `{agent_id}` 來實現模型切換。前端透過監聽 Server-Sent Events (SSE) 的 `RunContent` 區塊來即時顯示回應。
+
+---
+
 ## ⚠️ 開發注意事項
 
 ### 套件安裝
