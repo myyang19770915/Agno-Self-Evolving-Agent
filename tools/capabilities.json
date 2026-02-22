@@ -1,0 +1,22 @@
+{
+  "text_to_sha256": {
+    "description": "Convert any input string to its SHA256 hexadecimal hash.",
+    "file": "crypto.py",
+    "usage": "from tools.crypto import text_to_sha256"
+  },
+  "celsius_to_fahrenheit": {
+    "description": "Convert Celsius temperature(s) to Fahrenheit. Accepts a single numeric value or an iterable of numeric values.",
+    "file": "converter.py",
+    "usage": "from tools.converter import celsius_to_fahrenheit"
+  },
+  "get_products_summary": {
+    "description": "Fetch products table and return per-category product count and average unit_price. Supports passing pre-fetched rows or querying the DB via db_helper. Parameters: limit=None, round_digits=2, return_df=False, rows=None. Returns list[dict] or pandas.DataFrame.",
+    "file": "get_products_summary.py",
+    "usage": "from tools.get_products_summary import get_products_summary"
+  },
+  "get_category_stats": {
+    "description": "Query product categories and return list[dict] with category, product_count, average_price (rounded). Uses db_helper for DB access.",
+    "file": "get_category_stats.py",
+    "usage": "from tools.get_category_stats import get_category_stats"
+  }
+}

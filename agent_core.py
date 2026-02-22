@@ -1,0 +1,249 @@
+"""
+Agent 核心模組
+建立具備自我擴充、錯誤自癒與技能記憶的 Self-Evolving Agent。
+技能會從 SQLite 資料庫動態載入，並透過 agent.add_tool() 註冊為原生 Agno 工具。
+"""
+
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+from agno.agent import Agent
+from agno.models.litellm import LiteLLMOpenAI
+from agno.db.sqlite import SqliteDb
+from agno.tools.python import PythonTools
+from agno.tools.shell import ShellTools
+
+from capability_manager import CapabilityManager
+import database as db
+from agno.tools.sql import SQLTools
+
+# 確保商業資料庫已初始化並填充資料
+import business_db  # noqa: F401 — 載入模組時自動 init + seed
+
+# 載入環境變數
+load_dotenv()
+
+# 模組層級的 Agent 引用，供 save_agent_skill 使用
+_agent_instance: Agent | None = None
+_cap_manager: CapabilityManager | None = None
+
+
+def _build_system_instructions(cap_manager: CapabilityManager) -> list[str]:
+    """
+    組裝 Agent 的系統指令，包含動態注入的技能清單。
+
+    Args:
+        cap_manager: 技能管理器實例
+
+    Returns:
+        指令字串列表
+    """
+    skills_summary = cap_manager.get_skills_summary()
+
+    return [
+        "你是 Self-Evolving Agent，一個具備自我擴充、錯誤自癒與技能記憶能力的 AI 助手。",
+        "",
+        "【核心原則】",
+        "1. 你可以撰寫並執行 Python 程式碼來完成各種任務。",
+        "2. ❗ 安裝套件時，禁止使用 pip_install_package 或 uv_pip_install_package。",
+        "   請一律使用 ShellTools 執行: run_shell_command(['uv', 'add', '套件名稱'])",
+        "3. 執行程式碼報錯時，分析 Traceback 錯誤訊息，修正代碼後重新執行，不要輕易放棄。",
+        "4. 你有一份技能記憶系統，可以持久化保存你開發的有用函數。",
+        "",
+        "【技能管理 — 非常重要】",
+        "- 使用 `save_agent_skill` 工具來儲存新技能。儲存後，技能會自動註冊為你的原生工具。",
+        "- 使用 `list_agent_skills` 工具來查看已有技能清單。",
+        "- ⚡ 你的已儲存技能會在啟動時自動從資料庫載入為原生工具，你可以直接呼叫它們。",
+        "- 如果你的工具清單中已有某個技能（例如 text_to_sha256），請直接呼叫該工具，不要用 PythonTools 重寫。",
+        "- 只有具備重複使用價值的函數才需要儲存為技能，一次性的代碼不需要。",
+        "",
+        "【撰寫技能的重要規範】",
+        "- 技能是獨立的 Python 模組，不能呼叫 Agent 層級的工具（如 run_sql_query）。",
+        "- 如果技能需要查詢資料庫，請 import db_helper 模組：",
+        "    from db_helper import query, query_df",
+        "    rows = query('SELECT * FROM products')        # 回傳 list[dict]",
+        "    df = query_df('SELECT * FROM products')       # 回傳 pandas DataFrame",
+        "- 技能必須是自包含的，所有依賴都用 import 處理。",
+        "",
+        skills_summary,
+        "",
+        "【商業資料庫查詢 — 非常重要】",
+        "- 你擁有 SQLTools 工具，可以直接查詢商業資料庫。",
+        "- 使用 `list_tables` 查看所有資料表。",
+        "- 使用 `describe_table` 查看特定表的欄位。",
+        "- 使用 `run_sql_query` 執行 SQL SELECT 查詢。",
+        "- 當使用者用自然語言提問時，你應該：",
+        "  1. 先理解使用者的意圖",
+        "  2. 將自然語言轉換為 SQL 查詢",
+        "  3. 執行查詢並解釋結果",
+        "  4. 如果適合，用 Plotly 畫圖視覺化",
+        "",
+        "【資料庫 Schema 參考】",
+        "- products: id, name, category, unit_price, stock_quantity",
+        "  category 包含: 電腦, 手機, 平板, 配件, 穿戴, 遊戲, 家電, 閱讀, 相機",
+        "- customers: id, name, email, city, membership_level(Bronze/Silver/Gold/Platinum), join_date",
+        "  city 包含: 台北, 新北, 桃園, 台中, 台南, 高雄, 新竹, 嘉義",
+        "- orders: id, customer_id, order_date(2024~2025), total_amount, status(completed/cancelled/refunded)",
+        "- order_items: id, order_id, product_id, quantity, unit_price, subtotal",
+        "- employees: id, name, department, position, salary, hire_date",
+        "",
+        "【資料視覺化 — Plotly 圖表】",
+        "- 當使用者要求畫圖或資料視覺化時，請使用 Plotly 庫。",
+        "- 產生圖表後，使用 `fig.write_html('charts/<檔名>.html')` 儲存。",
+        "- 在回應中提供連結：`http://localhost:7777/charts/<檔名>.html`",
+        "- 檔名會自動挂載為靜態檔案，使用者可在瀏覽器中查看互動式圖表。",
+        "- 檔名請用英文小寫加底線，例如: gdp_growth.html, sales_trend.html",
+        "",
+        "【回應格式】",
+        "- 使用 Markdown 格式回應。",
+        "- 展示關鍵的程式碼和執行結果。",
+        "- 如果儲存了新技能，明確告知使用者。",
+        "- 如果使用了已有技能，說明是從技能庫載入的。",
+    ]
+
+
+def save_agent_skill(name: str, description: str, code: str, filename: str = "") -> str:
+    """
+    將一個新技能儲存到 Agent 的技能庫中。
+    技能會同時寫入 tools/ 目錄的 .py 檔案、capabilities.json 索引、SQLite 資料庫，
+    並且立即動態註冊為 Agent 的原生工具（無需重啟）。
+
+    Args:
+        name: 技能名稱（也是主要函數的名稱）
+        description: 這個技能做什麼的簡短描述
+        code: 技能的完整 Python 程式碼
+        filename: 儲存的檔案名稱（不含 .py 副檔名），留空則使用 name
+
+    Returns:
+        操作結果訊息
+    """
+    global _agent_instance, _cap_manager
+
+    if _cap_manager is None:
+        _cap_manager = CapabilityManager()
+
+    # 儲存到檔案 + JSON + DB
+    result = _cap_manager.save_skill(name, description, code, filename)
+
+    # 動態編譯並註冊為 Agno 原生工具
+    func = CapabilityManager.compile_skill_function(name, code)
+    if func and _agent_instance:
+        try:
+            _agent_instance.add_tool(func)
+            result += f"\n🔧 已動態註冊為原生工具，可直接呼叫 `{name}()`。"
+        except Exception as e:
+            result += f"\n⚠️ 動態註冊失敗: {e}（仍可透過 import 使用）"
+
+    return result
+
+
+def list_agent_skills() -> str:
+    """
+    列出 Agent 目前所有已習得的技能清單（從資料庫讀取）。
+
+    Returns:
+        格式化的技能清單
+    """
+    global _cap_manager
+    if _cap_manager is None:
+        _cap_manager = CapabilityManager()
+
+    skills = _cap_manager.list_skills()
+
+    if not skills:
+        return "📭 目前尚無已儲存的技能。"
+
+    lines = ["📚 已習得技能清單（已從 DB 載入為原生工具）："]
+    for s in skills:
+        lines.append(f"  - **{s['name']}**: {s.get('description', '無描述')}")
+        if s.get("file_path"):
+            lines.append(f"    檔案: {s['file_path']}")
+    return "\n".join(lines)
+
+
+def _load_existing_skills(agent: Agent, cap_manager: CapabilityManager) -> int:
+    """
+    從資料庫載入所有已儲存的技能，編譯並註冊為 Agent 的原生工具。
+
+    Args:
+        agent: Agno Agent 實例
+        cap_manager: 技能管理器
+
+    Returns:
+        成功載入的技能數量
+    """
+    skill_functions = cap_manager.load_all_skill_functions()
+    loaded = 0
+
+    for skill_name, func in skill_functions:
+        try:
+            agent.add_tool(func)
+            loaded += 1
+        except Exception as e:
+            print(f"  ⚠️ 註冊技能 '{skill_name}' 失敗: {e}")
+
+    return loaded
+
+
+def create_agent(model_id: str = "") -> Agent:
+    """
+    建立 Self-Evolving Agent 實例。
+    會自動從資料庫載入所有已儲存的技能並註冊為原生工具。
+
+    Args:
+        model_id: LLM 模型 ID，留空則使用環境變數 DEFAULT_MODEL
+
+    Returns:
+        設定完成的 Agent 實例
+    """
+    global _agent_instance, _cap_manager
+
+    # 讀取設定
+    api_key = os.getenv("LITELLM_API_KEY", "sk-1234")
+    base_url = os.getenv("LITELLM_BASE_URL", "http://localhost:4001/v1")
+    if not model_id:
+        model_id = os.getenv("DEFAULT_MODEL", "gpt-5-mini")
+
+    # 建立技能管理器
+    _cap_manager = CapabilityManager()
+
+    # 組裝 Agent（先用基礎工具）
+    agent = Agent(
+        name="Self-Evolving Agent",
+        model=LiteLLMOpenAI(
+            id=model_id,
+            api_key=api_key,
+            base_url=base_url,
+        ),
+        tools=[
+            PythonTools(base_dir=Path(__file__).parent),
+            ShellTools(),
+            SQLTools(db_url=f"sqlite:///{Path(__file__).parent / 'data' / 'business.db'}"),
+            save_agent_skill,
+            list_agent_skills,
+        ],
+        instructions=_build_system_instructions(_cap_manager),
+        markdown=True,
+        add_datetime_to_context=True,
+        # 多輪對話支援：使用 SQLite 儲存會話歷史
+        db=SqliteDb(
+            db_file=str(Path(__file__).parent / "data" / "sessions.db"),
+            session_table="agent_sessions",
+        ),
+        add_history_to_context=True,
+        num_history_runs=5,  # 保留最近 5 輪對話作為上下文
+    )
+
+    # 保存 Agent 引用（供 save_agent_skill 動態註冊使用）
+    _agent_instance = agent
+
+    # 從 DB 載入已有技能並動態註冊
+    print("📂 從資料庫載入已儲存的技能...")
+    loaded = _load_existing_skills(agent, _cap_manager)
+    if loaded > 0:
+        print(f"✅ 已載入 {loaded} 個技能為原生工具。")
+    else:
+        print("📭 資料庫中尚無已儲存的技能。")
+
+    return agent

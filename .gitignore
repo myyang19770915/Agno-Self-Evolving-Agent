@@ -1,0 +1,25 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# 環境變數 (含敏感資訊)
+.env
+
+# SQLite 資料庫 (可由程式自動建立)
+data/*.db
+
+# uv lock (可選，依團隊需求決定是否追蹤)
+# uv.lock
+
+# Plotly 圖表輸出 (動態生成)
+charts/*.html
+
+# Agent 動態生成的技能檔案 (依需求決定是否追蹤)
+# tools/*.py

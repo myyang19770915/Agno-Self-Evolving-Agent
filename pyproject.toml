@@ -1,0 +1,18 @@
+[project]
+name = "agno-project"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.13"
+dependencies = [
+    "ag-ui-protocol>=0.1.13",
+    "agno>=2.5.3",
+    "fastapi>=0.129.0",
+    "litellm>=1.81.13",
+    "pandas>=3.0.1",
+    "plotly>=6.5.2",
+    "python-dotenv>=1.2.1",
+    "requests>=2.32.5",
+    "sqlalchemy>=2.0.46",
+    "uvicorn>=0.41.0",
+    "websockets>=16.0",
+]
